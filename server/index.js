@@ -1,24 +1,19 @@
+import 'dotenv/config';
+
 /**
  * Deadlock - Backend
- * 
+ *
  * ZERO-KNOWLEDGE: Server stores ONLY encrypted blobs.
  * We never see, never can decrypt, never store plaintext.
  * Compromised DB = useless encrypted data.
+ *
+ * Database: Set DATABASE_URL for PostgreSQL (Neon, Supabase, etc.)
+ * Leave unset for local SQLite.
  */
 
 import express from 'express';
 import crypto from 'crypto';
-import fs from 'fs';
-import Database from 'better-sqlite3';
-import { fileURLToPath } from 'url';
-import { dirname, join } from 'path';
-
-const __filename = fileURLToPath(import.meta.url);
-const __dirname = dirname(__filename);
-
-// Ensure data directory exists
-const dataDir = join(__dirname, '../data');
-if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+import { initDb, dbQuery, dbGet, isPg } from './db.js';
 
 const app = express();
 app.use(express.json({ limit: '100kb' }));
@@ -60,26 +55,6 @@ function rateLimitMiddleware(req, res, next) {
 }
 app.use(rateLimitMiddleware);
 
-// DB init
-const dbPath = join(__dirname, '../data/vault.db');
-const db = new Database(dbPath);
-
-db.exec(`
-  CREATE TABLE IF NOT EXISTS users (
-    id TEXT PRIMARY KEY,
-    login_hash TEXT NOT NULL UNIQUE,
-    salt TEXT NOT NULL,
-    auth_hash TEXT NOT NULL,
-    created_at INTEGER NOT NULL
-  );
-  CREATE TABLE IF NOT EXISTS vaults (
-    user_id TEXT PRIMARY KEY REFERENCES users(id),
-    encrypted_data TEXT NOT NULL,
-    updated_at INTEGER NOT NULL
-  );
-  CREATE INDEX IF NOT EXISTS idx_users_login ON users(login_hash);
-`);
-
 // Validate inputs - reject obviously malicious payloads
 function validateUserId(id) {
   return typeof id === 'string' && /^[a-f0-9]{64}$/.test(id) && id.length === 64;
@@ -89,37 +64,35 @@ function validateBase64(str, maxLen = 500000) {
   return typeof str === 'string' && str.length <= maxLen && /^[A-Za-z0-9+/=]+$/.test(str);
 }
 
-// Generate cryptographically random ID
 function randomId() {
   return crypto.randomBytes(32).toString('hex');
 }
 
-// POST /register - Client sends: { salt, loginHash, authHash }
-app.post('/api/register', (req, res) => {
+// POST /register
+app.post('/api/register', async (req, res) => {
   try {
     const { salt, loginHash, authHash } = req.body || {};
     if (!validateBase64(salt, 200) || !validateBase64(loginHash, 200) || !validateBase64(authHash, 200)) {
       return res.status(400).json({ error: 'Invalid input' });
     }
     const id = randomId();
-    const stmt = db.prepare(
-      'INSERT INTO users (id, login_hash, salt, auth_hash, created_at) VALUES (?, ?, ?, ?, ?)'
+    await dbQuery(
+      'INSERT INTO users (id, login_hash, salt, auth_hash, created_at) VALUES (?, ?, ?, ?, ?)',
+      [id, loginHash, salt, authHash, Date.now()]
     );
-    stmt.run(id, loginHash, salt, authHash, Date.now());
     res.json({ userId: id });
   } catch (e) {
-    if (e.code === 'SQLITE_CONSTRAINT') return res.status(400).json({ error: 'Registration failed' });
+    if (e.code === '23505' || e.code === 'SQLITE_CONSTRAINT_UNIQUE') return res.status(400).json({ error: 'Registration failed' });
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// POST /login - Client sends: { loginHash }
-// Returns userId + salt. Client derives key locally.
-app.post('/api/login', (req, res) => {
+// POST /login
+app.post('/api/login', async (req, res) => {
   try {
     const { loginHash } = req.body || {};
     if (!validateBase64(loginHash, 200)) return res.status(400).json({ error: 'Invalid input' });
-    const row = db.prepare('SELECT id, salt FROM users WHERE login_hash = ?').get(loginHash);
+    const row = await dbGet('SELECT id, salt FROM users WHERE login_hash = ?', [loginHash]);
     if (!row) return res.status(401).json({ error: 'Invalid credentials' });
     res.json({ userId: row.id, salt: row.salt });
   } catch (e) {
@@ -127,56 +100,63 @@ app.post('/api/login', (req, res) => {
   }
 });
 
-// GET /vault/:userId - Fetch encrypted vault. Auth via authHash in body for GET? No - use POST.
-// Actually for simplicity: require authHash in body for vault access.
-app.post('/api/vault', (req, res) => {
+// POST /api/vault - Fetch encrypted vault
+app.post('/api/vault', async (req, res) => {
   try {
     const { userId, authHash } = req.body || {};
     if (!validateUserId(userId) || !validateBase64(authHash, 200)) {
       return res.status(400).json({ error: 'Invalid input' });
     }
-    const user = db.prepare('SELECT id FROM users WHERE id = ? AND auth_hash = ?').get(userId, authHash);
+    const user = await dbGet('SELECT id FROM users WHERE id = ? AND auth_hash = ?', [userId, authHash]);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    const row = db.prepare('SELECT encrypted_data FROM vaults WHERE user_id = ?').get(userId);
+    const row = await dbGet('SELECT encrypted_data FROM vaults WHERE user_id = ?', [userId]);
     res.json({ encryptedData: row ? row.encrypted_data : null });
   } catch (e) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// PUT /vault - Save encrypted vault
-app.put('/api/vault', (req, res) => {
+// PUT /api/vault - Save encrypted vault
+app.put('/api/vault', async (req, res) => {
   try {
     const { userId, authHash, encryptedData } = req.body || {};
     if (!validateUserId(userId) || !validateBase64(authHash, 200) || !validateBase64(encryptedData)) {
       return res.status(400).json({ error: 'Invalid input' });
     }
-    const user = db.prepare('SELECT id FROM users WHERE id = ? AND auth_hash = ?').get(userId, authHash);
+    const user = await dbGet('SELECT id FROM users WHERE id = ? AND auth_hash = ?', [userId, authHash]);
     if (!user) return res.status(401).json({ error: 'Unauthorized' });
-    db.prepare(`
-      INSERT INTO vaults (user_id, encrypted_data, updated_at) VALUES (?, ?, ?)
-      ON CONFLICT(user_id) DO UPDATE SET encrypted_data = excluded.encrypted_data, updated_at = excluded.updated_at
-    `).run(userId, encryptedData, Date.now());
+    await dbQuery(
+      `INSERT INTO vaults (user_id, encrypted_data, updated_at) VALUES (?, ?, ?)
+       ON CONFLICT (user_id) DO UPDATE SET encrypted_data = EXCLUDED.encrypted_data, updated_at = EXCLUDED.updated_at`,
+      [userId, encryptedData, Date.now()]
+    );
     res.json({ ok: true });
   } catch (e) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// GET /api/stats - Aggregate counts only. No PII, no individual data.
-// Safe to expose: user count cannot identify anyone.
-app.get('/api/stats', (req, res) => {
+// GET /api/db - Confirm which database is in use
+app.get('/api/db', (req, res) => {
+  res.json({ database: isPg() ? 'postgresql' : 'sqlite' });
+});
+
+// GET /api/stats
+app.get('/api/stats', async (req, res) => {
   try {
-    const userCount = db.prepare('SELECT COUNT(*) as n FROM users').get().n;
-    const vaultCount = db.prepare('SELECT COUNT(*) as n FROM vaults').get().n;
-    res.json({ userCount, vaultCount });
+    const userRow = await dbGet('SELECT COUNT(*) as n FROM users');
+    const vaultRow = await dbGet('SELECT COUNT(*) as n FROM vaults');
+    res.json({ userCount: Number(userRow?.n ?? 0), vaultCount: Number(vaultRow?.n ?? 0) });
   } catch (e) {
     res.status(500).json({ error: 'Server error' });
   }
 });
 
-// Serve static frontend in production only
+// Serve static frontend in production
 if (process.env.NODE_ENV === 'production') {
+  const { fileURLToPath } = await import('url');
+  const { dirname, join } = await import('path');
+  const __dirname = dirname(fileURLToPath(import.meta.url));
   const distPath = join(__dirname, '../dist');
   app.use(express.static(distPath));
   app.get('*', (req, res) => {
@@ -185,4 +165,15 @@ if (process.env.NODE_ENV === 'production') {
 }
 
 const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => console.log(`Deadlock running on http://localhost:${PORT}`));
+
+initDb()
+  .then(() => {
+    app.listen(PORT, () => {
+      const dbType = process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite';
+      console.log(`Deadlock running on http://localhost:${PORT} (${dbType})`);
+    });
+  })
+  .catch((err) => {
+    console.error('Database init failed:', err);
+    process.exit(1);
+  });

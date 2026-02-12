@@ -3,6 +3,37 @@
  * Zero-knowledge: All encryption/decryption happens in the browser
  */
 
+// Web Crypto API (crypto.subtle) requires a secure context (HTTPS or localhost).
+// HTTP over LAN (e.g. http://10.x.x.x:5173) is NOT secure, so crypto.subtle is undefined.
+if (!window.crypto?.subtle) {
+  document.body.innerHTML = `
+    <div class="secure-context-error" style="
+      display: flex;
+      flex-direction: column;
+      align-items: center;
+      justify-content: center;
+      min-height: 100vh;
+      padding: 24px;
+      font-family: 'DM Sans', sans-serif;
+      text-align: center;
+      background: #0d1117;
+      color: #c9d1d9;
+    ">
+      <h1 style="font-size: 1.5rem; margin-bottom: 1rem;">🔒 Secure context required</h1>
+      <p style="max-width: 420px; line-height: 1.6; margin-bottom: 1.5rem;">
+        Encryption only works over HTTPS or localhost. You're likely on HTTP from another device (e.g. phone).
+      </p>
+      <p style="max-width: 420px; line-height: 1.6; margin-bottom: 1rem; color: #8b949e;">
+        <strong>To use on your phone:</strong> Run <code style="background:#21262d;padding:2px 6px;border-radius:4px">npx ngrok http 5173</code> in a terminal, then open the <strong>https://</strong> URL on your phone.
+      </p>
+      <p style="font-size: 0.9rem; color: #6e7681;">
+        Or use the app on this computer at <a href="http://localhost:5173" style="color:#58a6ff">localhost:5173</a>.
+      </p>
+    </div>
+  `;
+  throw new Error('Secure context required');
+}
+
 import { WORDLIST } from './wordlist.js';
 import {
   generateMasterKey,
@@ -96,8 +127,8 @@ function renderWelcome() {
   return `
     <div class="screen active" id="welcome">
       <div class="brand">
-        <div class="brand-icon">&#x1F512;</div>
-        <h1>Deadlock</h1>
+        <img src="/logo.png" alt="Deadlock" class="brand-logo" />
+        
         <p class="brand-tagline">Zero-knowledge password manager. Your data is encrypted before it leaves your device.</p>
       </div>
       <div class="auth-card">

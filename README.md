@@ -24,6 +24,35 @@ npm run dev
 - Frontend: http://localhost:5173  
 - API proxy: /api → http://localhost:3000
 
+Uses SQLite by default (data stored in `data/vault.db`).
+
+### Testing on phone/other device
+
+Encryption requires a **secure context** (HTTPS or localhost). HTTP over LAN (`http://10.x.x.x:5173`) will fail with "digest" errors. Use a tunnel:
+
+```bash
+npx ngrok http 5173
+```
+
+Open the **https://** URL ngrok gives you on your phone.
+
+## Hosted Database (PostgreSQL)
+
+To use a hosted database instead of SQLite:
+
+1. Create a free PostgreSQL database:
+   - [Neon](https://neon.tech) – serverless Postgres
+   - [Supabase](https://supabase.com) – Postgres + auth
+   - [Railway](https://railway.app), [PlanetScale](https://planetscale.com), etc.
+
+2. Copy the connection string and set it:
+   ```bash
+   export DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
+   ```
+   Or create a `.env` file (see `.env.example`).
+
+3. Restart the server. Tables are created automatically.
+
 ## Production
 
 ```bash
