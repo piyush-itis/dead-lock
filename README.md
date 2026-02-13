@@ -11,7 +11,7 @@ A lightweight, secure password manager where **all sensitive data is encrypted o
 - **12-word master key** — Generated from BIP39 wordlist (~128 bits entropy). Write it down; there is no recovery.
 - **Client-side encryption** — AES-256-GCM. Passwords are encrypted in the browser, never sent in plaintext.
 - **Zero-knowledge** — The server stores only encrypted blobs, salt, and auth hashes. It cannot decrypt your data.
-- **Key derivation** — PBKDF2-SHA256 with 120,000 iterations.
+- **Key derivation** — PBKDF2-SHA256 with 600,000 iterations (OWASP).
 - **Non-recoverable** — Lose your master key = lose access forever. No backdoors, no recovery options.
 
 ## Run Locally
@@ -53,7 +53,11 @@ To use a hosted database instead of SQLite:
 
 3. Restart the server. Tables are created automatically.
 
-## Production
+## Deploy
+
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment to Railway or Render.
+
+## Production (local)
 
 ```bash
 npm run build
@@ -61,6 +65,12 @@ NODE_ENV=production npm start
 ```
 
 Serves the built frontend from `dist/` and API on the same port.
+
+**Required for production:**
+
+1. **HTTPS** — Deploy behind TLS (nginx, Caddy, Vercel, Railway, etc.). The server rejects HTTP when `NODE_ENV=production` and `trust proxy` is set.
+2. **CORS** — If frontend and API are on different origins, set `ALLOWED_ORIGINS` (comma-separated), e.g. `ALLOWED_ORIGINS=https://app.example.com`. Same-origin deployment can leave it unset.
+3. **PostgreSQL SSL** — Remote Postgres connections verify certificates. Neon/Supabase use valid certs by default.
 
 ## Data Stored (Server)
 

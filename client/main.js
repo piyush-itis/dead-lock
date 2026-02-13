@@ -47,9 +47,11 @@ import {
   computeLoginHash,
   passwordStrength,
   checkPasswordBreach,
+  PBKDF2_ITERATIONS,
 } from './crypto.js';
 
 const API = '/api';
+const API_HEADERS = { 'Content-Type': 'application/json', 'X-Requested-With': 'XMLHttpRequest' };
 
 let state = {
   userId: null,
@@ -57,7 +59,46 @@ let state = {
   authHash: null,
   key: null,
   entries: [],
+  vaultSearch: '',
 };
+
+const INACTIVITY_MS = 15 * 60 * 1000; // 15 min
+const WARN_BEFORE_MS = 1 * 60 * 1000; // warn 1 min before logout
+let inactivityTimer = null;
+let inactivityWarnTimer = null;
+
+function resetInactivityTimer() {
+  clearTimeout(inactivityTimer);
+  clearTimeout(inactivityWarnTimer);
+  if (!state.key) return;
+  inactivityWarnTimer = setTimeout(() => {
+    showAlert('You will be logged out in 1 minute due to inactivity.');
+  }, INACTIVITY_MS - WARN_BEFORE_MS);
+  inactivityTimer = setTimeout(() => {
+    clearTimeout(inactivityWarnTimer);
+    state = { userId: null, salt: null, authHash: null, key: null, entries: [], vaultSearch: '' };
+    $('#app').innerHTML = renderWelcome();
+    bindWelcome();
+    document.removeEventListener('click', resetInactivityTimer);
+    document.removeEventListener('keydown', resetInactivityTimer);
+    document.removeEventListener('scroll', resetInactivityTimer);
+  }, INACTIVITY_MS);
+}
+
+function startInactivityTracking() {
+  resetInactivityTimer();
+  document.addEventListener('click', resetInactivityTimer);
+  document.addEventListener('keydown', resetInactivityTimer);
+  document.addEventListener('scroll', resetInactivityTimer);
+}
+
+function stopInactivityTracking() {
+  clearTimeout(inactivityTimer);
+  clearTimeout(inactivityWarnTimer);
+  document.removeEventListener('click', resetInactivityTimer);
+  document.removeEventListener('keydown', resetInactivityTimer);
+  document.removeEventListener('scroll', resetInactivityTimer);
+}
 
 function $(sel, parent = document) {
   return parent.querySelector(sel);
@@ -71,11 +112,11 @@ function uuid() {
   return crypto.randomUUID();
 }
 
-async function apiRegister(salt, loginHash, authHash) {
+async function apiRegister(salt, loginHash, authHash, iterations = PBKDF2_ITERATIONS) {
   const res = await fetch(`${API}/register`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ salt, loginHash, authHash }),
+    headers: API_HEADERS,
+    body: JSON.stringify({ salt, loginHash, authHash, iterations }),
   });
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
@@ -87,7 +128,7 @@ async function apiRegister(salt, loginHash, authHash) {
 async function apiLogin(loginHash) {
   const res = await fetch(`${API}/login`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: API_HEADERS,
     body: JSON.stringify({ loginHash }),
   });
   if (!res.ok) {
@@ -100,7 +141,7 @@ async function apiLogin(loginHash) {
 async function apiGetVault(userId, authHash) {
   const res = await fetch(`${API}/vault`, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers: API_HEADERS,
     body: JSON.stringify({ userId, authHash }),
   });
   if (!res.ok) throw new Error('Failed to load vault');
@@ -110,10 +151,33 @@ async function apiGetVault(userId, authHash) {
 async function apiSaveVault(userId, authHash, encryptedData) {
   const res = await fetch(`${API}/vault`, {
     method: 'PUT',
-    headers: { 'Content-Type': 'application/json' },
+    headers: API_HEADERS,
     body: JSON.stringify({ userId, authHash, encryptedData }),
   });
   if (!res.ok) throw new Error('Failed to save vault');
+  return res.json();
+}
+
+async function apiGetVaultHistory(userId, authHash) {
+  const res = await fetch(`${API}/vault/history`, {
+    method: 'POST',
+    headers: API_HEADERS,
+    body: JSON.stringify({ userId, authHash }),
+  });
+  if (!res.ok) throw new Error('Failed to load history');
+  return res.json();
+}
+
+async function apiRestoreVault(userId, authHash, versionId) {
+  const res = await fetch(`${API}/vault/restore`, {
+    method: 'POST',
+    headers: API_HEADERS,
+    body: JSON.stringify({ userId, authHash, versionId }),
+  });
+  if (!res.ok) {
+    const err = await res.json().catch(() => ({}));
+    throw new Error(err.error || 'Failed to restore');
+  }
   return res.json();
 }
 
@@ -233,12 +297,21 @@ function renderLoginEmail() {
 }
 
 function renderVault() {
+  const query = (state.vaultSearch ?? '').trim().toLowerCase();
+  const filtered = query
+    ? state.entries.filter(
+        (e) =>
+          (e.website || '').toLowerCase().includes(query) ||
+          (e.username || '').toLowerCase().includes(query)
+      )
+    : state.entries;
+
   const oldEntries = state.entries.filter((e) => {
     const days = getPasswordAge(e.updatedAt);
     return days !== null && days >= PWD_AGE_DAYS_WARN;
   });
-  const entriesHtml = state.entries.length
-    ? state.entries
+  const entriesHtml = filtered.length
+    ? filtered
         .map(
           (e) => {
             const name = e.website || 'Unnamed';
@@ -264,7 +337,9 @@ function renderVault() {
           }
         )
         .join('')
-    : '<div class="empty-state">No passwords yet.<br>Add your first one to get started.</div>';
+    : query
+      ? '<div class="empty-state">No passwords match your search.</div>'
+      : '<div class="empty-state">No passwords yet.<br>Add your first one to get started.</div>';
 
   const ageAlertHtml = oldEntries.length > 0 ? `
       <div class="age-alert">
@@ -278,16 +353,39 @@ function renderVault() {
       <div class="lockr-header">
         <div class="lockr-title">
           <h1>Lockr</h1>
-          <span class="lockr-count">${state.entries.length} ${state.entries.length === 1 ? 'password' : 'passwords'}</span>
+          <span class="lockr-count">${query ? `${filtered.length} of ${state.entries.length}` : state.entries.length} ${state.entries.length === 1 ? 'password' : 'passwords'}</span>
         </div>
-        <button class="btn-ghost" data-action="logout">Log out</button>
+        <div class="lockr-header-actions">
+          <button class="btn-ghost btn-icon-text" data-action="history" title="Version history">History</button>
+          <button class="btn-ghost btn-icon-text" data-action="export-backup" title="Export backup">Export</button>
+          <button class="btn-ghost btn-icon-text" data-action="import-backup" title="Import backup">Import</button>
+          <button class="btn-ghost" data-action="logout">Log out</button>
+        </div>
       </div>
       ${ageAlertHtml}
+      <div class="vault-search-wrap">
+        <input type="text" class="vault-search" id="vaultSearch" placeholder="Search by service or username..." value="${escapeAttr(state.vaultSearch ?? '')}" autocomplete="off" />
+      </div>
       <div class="entry-list">${entriesHtml}</div>
       <button class="btn-primary btn-add" id="addEntry">
         <span class="btn-add-icon">+</span>
         Add password
       </button>
+    </div>
+  `;
+}
+
+function renderHistoryModal() {
+  return `
+    <div class="modal-overlay" id="historyModal">
+      <div class="modal">
+        <h2 class="modal-title">Version history</h2>
+        <p class="modal-desc">Restore a previous version. This will replace your current vault.</p>
+        <div class="history-list" id="historyList">Loading...</div>
+        <div class="footer-actions">
+          <button class="btn-secondary" data-history-close>Close</button>
+        </div>
+      </div>
     </div>
   `;
 }
@@ -377,6 +475,40 @@ function escapeAttr(s) {
     .replace(/</g, '&lt;');
 }
 
+function showAlert(message) {
+  const overlay = document.createElement('div');
+  overlay.className = 'alert-overlay';
+  overlay.innerHTML = `
+    <div class="alert-card">
+      <div class="alert-message">${escapeHtml(message)}</div>
+      <div class="alert-actions">
+        <button class="btn-primary alert-dismiss">OK</button>
+      </div>
+    </div>
+  `;
+  const dismiss = () => {
+    overlay.style.opacity = '0';
+    overlay.style.transition = 'opacity 0.15s ease';
+    setTimeout(() => overlay.remove(), 150);
+  };
+  overlay.querySelector('.alert-dismiss').addEventListener('click', dismiss);
+  overlay.addEventListener('click', (e) => {
+    if (e.target === overlay) dismiss();
+  });
+  document.body.appendChild(overlay);
+}
+
+function isDuplicateEntry(entries, website, username, excludeId) {
+  const w = (website || '').trim().toLowerCase();
+  const u = (username || '').trim();
+  return entries.some((e) => {
+    if (excludeId && e.id === excludeId) return false;
+    const ew = (e.website || '').trim().toLowerCase();
+    const eu = (e.username || '').trim();
+    return ew === w && eu === u;
+  });
+}
+
 function bindWelcome() {
   $('[data-action="generate"]')?.addEventListener('click', () => {
     $('#app').innerHTML = renderGenerate();
@@ -417,14 +549,14 @@ function bindGenerate() {
     btn.textContent = 'Creating...';
     try {
       const { salt, loginHash, authHash } = await setupNewUser(phrase);
-      const { userId } = await apiRegister(salt, loginHash, authHash);
-      const { key } = await deriveFromMaster(phrase, salt);
-      state = { userId, salt, authHash, key, entries: [] };
+      const { userId } = await apiRegister(salt, loginHash, authHash, PBKDF2_ITERATIONS);
+      const { key } = await deriveFromMaster(phrase, salt, PBKDF2_ITERATIONS);
+      state = { userId, salt, authHash, key, entries: [], vaultSearch: '' };
       await saveVault();
       $('#app').innerHTML = renderVault();
       bindVault();
     } catch (e) {
-      alert(e.message || 'Failed to create account');
+      showAlert(e.message || 'Failed to create account');
       btn.disabled = false;
       btn.textContent = 'Create account';
     }
@@ -484,25 +616,35 @@ function bindSignupEmail() {
     });
   }
 
+  const handleSignupSubmit = () => $('#doSignupEmail')?.click();
+  [$('#signupEmail'), $('#signupPassword'), $('#signupConfirm')].forEach((el) => {
+    el?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleSignupSubmit();
+      }
+    });
+  });
+
   $('#doSignupEmail')?.addEventListener('click', async () => {
     const email = $('#signupEmail')?.value?.trim().toLowerCase();
     const password = $('#signupPassword')?.value;
     const confirm = $('#signupConfirm')?.value;
 
     if (!email || !password) {
-      alert('Please enter email and password');
+      showAlert('Please enter email and password');
       return;
     }
     if (!/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(email)) {
-      alert('Please enter a valid email address');
+      showAlert('Please enter a valid email address');
       return;
     }
     if (password.length < 8) {
-      alert('Password must be at least 8 characters');
+      showAlert('Password must be at least 8 characters');
       return;
     }
     if (password !== confirm) {
-      alert('Passwords do not match');
+      showAlert('Passwords do not match');
       return;
     }
 
@@ -511,14 +653,14 @@ function bindSignupEmail() {
     btn.textContent = 'Creating...';
     try {
       const { salt, loginHash, authHash } = await setupNewUserEmail(email, password);
-      const { userId } = await apiRegister(salt, loginHash, authHash);
-      const { key } = await deriveFromPassword(password, salt);
-      state = { userId, salt, authHash, key, entries: [] };
+      const { userId } = await apiRegister(salt, loginHash, authHash, PBKDF2_ITERATIONS);
+      const { key } = await deriveFromPassword(password, salt, PBKDF2_ITERATIONS);
+      state = { userId, salt, authHash, key, entries: [], vaultSearch: '' };
       await saveVault();
       $('#app').innerHTML = renderVault();
       bindVault();
     } catch (e) {
-      alert(e.message || 'Failed to create account');
+      showAlert(e.message || 'Failed to create account');
       btn.disabled = false;
       btn.textContent = 'Create account';
     }
@@ -531,12 +673,22 @@ function bindLoginEmail() {
     bindWelcome();
   });
 
+  const handleLoginSubmit = () => $('#doLoginEmail')?.click();
+  [$('#loginEmail'), $('#loginPassword')].forEach((el) => {
+    el?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleLoginSubmit();
+      }
+    });
+  });
+
   $('#doLoginEmail')?.addEventListener('click', async () => {
     const email = $('#loginEmail')?.value?.trim().toLowerCase();
     const password = $('#loginPassword')?.value;
 
     if (!email || !password) {
-      alert('Please enter email and password');
+      showAlert('Please enter email and password');
       return;
     }
 
@@ -545,9 +697,9 @@ function bindLoginEmail() {
     btn.textContent = 'Signing in...';
     try {
       const loginHash = await computeLoginHash(email);
-      const { userId, salt } = await apiLogin(loginHash);
-      const { key, authHash } = await deriveFromPassword(password, salt);
-      state = { userId, salt, authHash, key, entries: [] };
+      const { userId, salt, iterations } = await apiLogin(loginHash);
+      const { key, authHash } = await deriveFromPassword(password, salt, iterations);
+      state = { userId, salt, authHash, key, entries: [], vaultSearch: '' };
       const { encryptedData } = await apiGetVault(userId, authHash);
       if (encryptedData) {
         const raw = await decryptVault(encryptedData, key);
@@ -560,7 +712,7 @@ function bindLoginEmail() {
       $('#app').innerHTML = renderVault();
       bindVault();
     } catch (e) {
-      alert(e.message || 'Sign in failed');
+      showAlert(e.message || 'Sign in failed');
     } finally {
       btn.disabled = false;
       btn.textContent = 'Sign in';
@@ -593,6 +745,11 @@ function bindLogin() {
         }
       });
       input.addEventListener('keydown', (e) => {
+        if (e.key === 'Enter') {
+          e.preventDefault();
+          $('#doLogin')?.click();
+          return;
+        }
         if (e.key === ' ' || e.key === 'ArrowRight') {
           e.preventDefault();
           if (idx < 11) inputs[idx + 1].focus();
@@ -623,7 +780,7 @@ function bindLogin() {
     const words = Array.from($$('.phrase-word', $('#login'))).map((i) => i.value.trim()).filter(Boolean);
     const phrase = words.join(' ');
     if (words.length !== 12) {
-      alert('Master key must be exactly 12 words');
+      showAlert('Master key must be exactly 12 words');
       return;
     }
     const btn = $('#doLogin');
@@ -631,9 +788,9 @@ function bindLogin() {
     btn.textContent = 'Signing in...';
     try {
       const loginHash = await computeLoginHash(phrase);
-      const { userId, salt } = await apiLogin(loginHash);
-      const { key, authHash } = await deriveFromMaster(phrase, salt);
-      state = { userId, salt, authHash, key, entries: [] };
+      const { userId, salt, iterations } = await apiLogin(loginHash);
+      const { key, authHash } = await deriveFromMaster(phrase, salt, iterations);
+      state = { userId, salt, authHash, key, entries: [], vaultSearch: '' };
       const { encryptedData } = await apiGetVault(userId, authHash);
       if (encryptedData) {
         const raw = await decryptVault(encryptedData, key);
@@ -646,7 +803,7 @@ function bindLogin() {
       $('#app').innerHTML = renderVault();
       bindVault();
     } catch (e) {
-      alert(e.message || 'Sign in failed');
+      showAlert(e.message || 'Sign in failed');
     } finally {
       btn.disabled = false;
       btn.textContent = 'Sign in';
@@ -655,15 +812,86 @@ function bindLogin() {
 }
 
 function bindVault() {
+  startInactivityTracking();
+
   $('[data-action="logout"]')?.addEventListener('click', () => {
-    state = { userId: null, salt: null, authHash: null, key: null, entries: [] };
+    stopInactivityTracking();
+    state = { userId: null, salt: null, authHash: null, key: null, entries: [], vaultSearch: '' };
     $('#app').innerHTML = renderWelcome();
     bindWelcome();
   });
 
+  const searchEl = $('#vaultSearch');
+  searchEl?.addEventListener('input', () => {
+    state.vaultSearch = searchEl.value ?? '';
+    const cursorPos = searchEl.selectionStart;
+    $('#app').innerHTML = renderVault();
+    bindVault();
+    const newSearch = $('#vaultSearch');
+    if (newSearch) {
+      newSearch.focus();
+      newSearch.setSelectionRange(cursorPos, cursorPos);
+    }
+  });
+
   $('#addEntry')?.addEventListener('click', () => {
+    if ($('#entryModal')) return;
     document.body.insertAdjacentHTML('beforeend', renderEntryModal());
     bindEntryModal(null);
+  });
+
+  $('[data-action="history"]')?.addEventListener('click', () => {
+    if ($('#historyModal')) return;
+    document.body.insertAdjacentHTML('beforeend', renderHistoryModal());
+    bindHistoryModal();
+  });
+
+  $('[data-action="export-backup"]')?.addEventListener('click', () => {
+    const payload = JSON.stringify({ entries: state.entries });
+    encryptVault(payload, state.key).then((encrypted) => {
+      const blob = new Blob(
+        [JSON.stringify({ version: 1, encryptedData: encrypted, exportedAt: Date.now() })],
+        { type: 'application/json' }
+      );
+      const a = document.createElement('a');
+      a.href = URL.createObjectURL(blob);
+      a.download = `deadlock-backup-${new Date().toISOString().slice(0, 10)}.json`;
+      a.click();
+      URL.revokeObjectURL(a.href);
+    });
+  });
+
+  $('[data-action="import-backup"]')?.addEventListener('click', () => {
+    const input = document.createElement('input');
+    input.type = 'file';
+    input.accept = '.json';
+    input.onchange = async (e) => {
+      const file = e.target?.files?.[0];
+      if (!file) return;
+      try {
+        const text = await file.text();
+        const { encryptedData } = JSON.parse(text);
+        if (!encryptedData) throw new Error('Invalid backup file');
+        const raw = await decryptVault(encryptedData, state.key);
+        const parsed = JSON.parse(raw);
+        const entries = parsed.entries || [];
+        if (!Array.isArray(entries)) throw new Error('Invalid backup data');
+        if (entries.length === 0 && state.entries.length > 0) {
+          showAlert('Backup is empty. Import would clear your vault.');
+          return;
+        }
+        if (!confirm(`Replace your vault with ${entries.length} entries from this backup?`)) return;
+        const enc = await encryptVault(JSON.stringify({ entries }), state.key);
+        await apiSaveVault(state.userId, state.authHash, enc);
+        state.entries = entries.map((e) => ({ ...e, updatedAt: e.updatedAt ?? e.createdAt }));
+        $('#app').innerHTML = renderVault();
+        bindVault();
+        showAlert('Backup imported successfully.');
+      } catch (err) {
+        showAlert(err.message || 'Invalid or encrypted backup. Ensure you use the correct account.');
+      }
+    };
+    input.click();
   });
 
   $('#app').addEventListener('click', async (e) => {
@@ -677,12 +905,13 @@ function bindVault() {
           btn.textContent = 'Copied!';
           setTimeout(() => { btn.textContent = 'Copy'; }, 1500);
         } catch (err) {
-          alert('Could not copy. Try selecting the password manually.');
+          showAlert('Could not copy. Try selecting the password manually.');
         }
       }
       return;
     }
     if (e.target?.hasAttribute('data-edit') && id) {
+      if ($('#entryModal')) return;
       const entry = state.entries.find((x) => x.id === id);
       if (entry) {
         document.body.insertAdjacentHTML('beforeend', renderEntryModal(entry));
@@ -700,17 +929,106 @@ function bindVault() {
   });
 }
 
+function bindHistoryModal() {
+  const modal = $('#historyModal');
+  if (!modal) return;
+
+  const close = () => {
+    modal.remove();
+  };
+
+  modal.querySelector('[data-history-close]')?.addEventListener('click', close);
+  modal.addEventListener('click', (e) => {
+    if (e.target === modal) close();
+  });
+
+  const list = $('#historyList', modal);
+  apiGetVaultHistory(state.userId, state.authHash)
+    .then(({ versions }) => {
+      if (versions.length === 0) {
+        list.innerHTML = '<div class="empty-state">No previous versions yet.</div>';
+        return;
+      }
+      list.innerHTML = versions
+        .map(
+          (v) => `
+          <div class="history-item">
+            <span class="history-date">${formatHistoryDate(v.createdAt)}</span>
+            <button class="btn-secondary btn-small" data-restore-version data-id="${escapeAttr(v.id)}">Restore</button>
+          </div>
+        `
+        )
+        .join('');
+      list.querySelectorAll('[data-restore-version]').forEach((btn) => {
+        btn.addEventListener('click', async () => {
+          if (!confirm('Restore this version? Your current vault will be replaced.')) return;
+          try {
+            await apiRestoreVault(state.userId, state.authHash, btn.dataset.id);
+            const { encryptedData } = await apiGetVault(state.userId, state.authHash);
+            const raw = await decryptVault(encryptedData, state.key);
+            const parsed = JSON.parse(raw);
+            state.entries = (parsed.entries || []).map((e) => ({
+              ...e,
+              updatedAt: e.updatedAt ?? e.createdAt,
+            }));
+            close();
+            $('#app').innerHTML = renderVault();
+            bindVault();
+            showAlert('Vault restored.');
+          } catch (e) {
+            showAlert(e.message || 'Restore failed');
+          }
+        });
+      });
+    })
+    .catch(() => {
+      list.innerHTML = '<div class="empty-state">Failed to load history.</div>';
+    });
+}
+
+function formatHistoryDate(ts) {
+  if (!ts) return 'Unknown';
+  const d = new Date(typeof ts === 'number' ? ts : parseInt(ts, 10));
+  if (isNaN(d.getTime())) return 'Unknown';
+  const now = new Date();
+  const diff = now - d;
+  if (diff < 60000) return 'Just now';
+  if (diff < 3600000) return `${Math.floor(diff / 60000)} min ago`;
+  if (diff < 86400000) return d.toLocaleTimeString();
+  return d.toLocaleDateString() + ' ' + d.toLocaleTimeString();
+}
+
 function bindEntryModal(entry) {
   const modal = $('#entryModal');
   if (!modal) return;
 
-  const cancel = () => {
-    modal.remove();
+  const escHandler = (e) => {
+    if (e.key === 'Escape') {
+      cleanup();
+    }
   };
+
+  const cleanup = () => {
+    modal.remove();
+    document.removeEventListener('keydown', escHandler);
+  };
+
+  const cancel = cleanup;
 
   modal.querySelector('[data-modal-cancel]')?.addEventListener('click', cancel);
   modal.addEventListener('click', (e) => {
     if (e.target === modal) cancel();
+  });
+  document.addEventListener('keydown', escHandler);
+
+  const handleModalSave = () => modal.querySelector('[data-modal-save]')?.click();
+  [$('#modalWebsite', modal), $('#modalUsername', modal), $('#modalPassword', modal)].forEach((el) => {
+    el?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        e.preventDefault();
+        handleModalSave();
+      }
+    });
   });
 
   const pwdInput = $('#modalPassword', modal);
@@ -786,10 +1104,27 @@ function bindEntryModal(entry) {
   });
 
   modal.querySelector('[data-modal-save]')?.addEventListener('click', async () => {
-    const website = $('#modalWebsite', modal)?.value?.trim() || 'Unnamed';
-    const username = $('#modalUsername', modal)?.value?.trim() || '';
-    const password = $('#modalPassword', modal)?.value || '';
+    const website = $('#modalWebsite', modal)?.value?.trim() ?? '';
+    const username = $('#modalUsername', modal)?.value?.trim() ?? '';
+    const password = $('#modalPassword', modal)?.value ?? '';
     const id = modal.querySelector('[data-modal-save]')?.dataset?.id;
+
+    if (!website) {
+      showAlert('Please enter a website or service name.');
+      return;
+    }
+    if (!password) {
+      showAlert('Please enter a password.');
+      return;
+    }
+
+    if (isDuplicateEntry(state.entries, website, username, entry?.id || null)) {
+      showAlert('An entry for this service and username already exists.');
+      return;
+    }
+
+    const saveBtn = modal.querySelector('[data-modal-save]');
+    saveBtn.disabled = true;
 
     const now = Date.now();
     if (entry && id) {
@@ -800,10 +1135,24 @@ function bindEntryModal(entry) {
     } else {
       state.entries.push({ id: uuid(), website, username, password, updatedAt: now });
     }
-    modal.remove();
-    await saveVault();
-    $('#app').innerHTML = renderVault();
-    bindVault();
+
+    try {
+      await saveVault();
+      cleanup();
+      $('#app').innerHTML = renderVault();
+      bindVault();
+    } catch (e) {
+      showAlert(e.message || 'Failed to save. Please try again.');
+      saveBtn.disabled = false;
+      if (entry && id) {
+        const idx = state.entries.findIndex((x) => x.id === id);
+        if (idx >= 0) {
+          state.entries[idx] = { ...state.entries[idx], website: entry.website, username: entry.username, password: entry.password, updatedAt: entry.updatedAt };
+        }
+      } else {
+        state.entries.pop();
+      }
+    }
   });
 }
 

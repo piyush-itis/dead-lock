@@ -3,7 +3,8 @@
  * Uses Web Crypto API. Master key never leaves the client.
  */
 
-const PBKDF2_ITERATIONS = 120000;
+export const PBKDF2_ITERATIONS_LEGACY = 120000; // for existing users
+export const PBKDF2_ITERATIONS = 600000; // OWASP recommendation for new users
 const SALT_LENGTH = 16;
 const IV_LENGTH = 12;
 const AUTH_TAG_LENGTH = 16;
@@ -12,7 +13,7 @@ const KEY_LENGTH = 256;
 /**
  * Derive encryption key from master phrase using PBKDF2
  */
-async function deriveKey(masterPhrase, saltBase64) {
+async function deriveKey(masterPhrase, saltBase64, iterations = PBKDF2_ITERATIONS) {
   const salt = typeof saltBase64 === 'string' ? b64decode(saltBase64) : saltBase64;
   const enc = new TextEncoder();
   const keyMaterial = await crypto.subtle.importKey(
@@ -23,7 +24,7 @@ async function deriveKey(masterPhrase, saltBase64) {
     ['deriveBits', 'deriveKey']
   );
   const key = await crypto.subtle.deriveKey(
-    { name: 'PBKDF2', salt, iterations: PBKDF2_ITERATIONS, hash: 'SHA-256' },
+    { name: 'PBKDF2', salt, iterations, hash: 'SHA-256' },
     keyMaterial,
     { name: 'AES-GCM', length: KEY_LENGTH },
     false,
@@ -140,8 +141,9 @@ export async function setupNewUser(masterPhrase) {
 /**
  * Get derived key and auth hash for existing user (login)
  */
-export async function deriveFromMaster(masterPhrase, salt) {
-  const key = await deriveKey(masterPhrase, salt);
+export async function deriveFromMaster(masterPhrase, salt, iterations) {
+  const iter = iterations ?? PBKDF2_ITERATIONS;
+  const key = await deriveKey(masterPhrase, salt, iter);
   const authHash = await computeAuthHash(masterPhrase, salt);
   return { key, authHash };
 }
@@ -160,8 +162,9 @@ export async function setupNewUserEmail(email, password) {
 /**
  * Derive key and auth hash for email+password login
  */
-export async function deriveFromPassword(password, salt) {
-  const key = await deriveKey(password, salt);
+export async function deriveFromPassword(password, salt, iterations) {
+  const iter = iterations ?? PBKDF2_ITERATIONS;
+  const key = await deriveKey(password, salt, iter);
   const authHash = await computeAuthHash(password, salt);
   return { key, authHash };
 }
