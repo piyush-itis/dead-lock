@@ -6,7 +6,7 @@
 
 If you discover a security issue, please report it privately:
 
-1. **Email** at stalain3@gmail.com (or use [GitHub Security Advisories](https://github.com/piyush-itis/deadlock/security/advisories/new))
+1. **Email** at stalain3@gmail.com (or use [GitHub Security Advisories](https://github.com/piyush-itis/dead-lock/security/advisories/new))
 2. Include:
    - Description of the vulnerability
    - Steps to reproduce

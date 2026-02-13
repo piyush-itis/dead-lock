@@ -20,7 +20,7 @@
 **Prerequisites:** Node.js 18+, a PostgreSQL database ([Neon](https://neon.tech) free tier works)
 
 ```bash
-git clone https://github.com/piyush-itis/deadlock.git
+git clone https://github.com/piyush-itis/dead-lock.git
 cd deadlock
 npm install
 ```
