@@ -1,32 +1,44 @@
 # Security Policy
 
-## Supported Versions
-
-We provide security updates for the latest release. Please update to the newest version.
-
 ## Reporting a Vulnerability
 
-**Please do not open a public GitHub issue for security vulnerabilities.**
+**Do not open a public issue for security vulnerabilities.**
 
-If you discover a security issue, please email the maintainer privately (or use GitHub Security Advisories). Include:
+If you discover a security issue, please report it privately:
 
-- Description of the vulnerability
-- Steps to reproduce
-- Potential impact
-- Suggested fix (if any)
+1. **Email** the maintainer (or use [GitHub Security Advisories](https://github.com/your-username/deadlock/security/advisories/new))
+2. Include:
+   - Description of the vulnerability
+   - Steps to reproduce
+   - Potential impact
+   - Suggested fix (if any)
 
-We aim to respond within 48 hours and will keep you updated on the fix and disclosure timeline.
+We aim to respond within 48 hours and will work with you on a fix and coordinated disclosure.
 
-## Security Model (Summary)
+---
 
-- **Zero-knowledge**: Server stores only encrypted data. We cannot decrypt user vaults.
-- **Client-side crypto**: AES-256-GCM, PBKDF2-SHA256 (600k iterations for new users; 120k for legacy). Keys derived in browser only.
-- **No recovery**: Lost master key = permanent data loss. By design.
-- **Breach check**: Uses HIBP k-anonymity API. Passwords never leave the device.
+## Security Model
+
+| Component | Implementation |
+|-----------|----------------|
+| **Encryption** | AES-256-GCM (authenticated) |
+| **Key derivation** | PBKDF2-SHA256, 600k iterations (new users), per-user salt |
+| **Zero-knowledge** | Server stores only encrypted blobs; cannot decrypt |
+| **Breach check** | HIBP k-anonymity API; password never leaves device |
+| **Auth** | Timing-safe compare, rate limits, CSRF protection |
+| **Transport** | HTTPS required in production |
+
+---
+
+## Supported Versions
+
+Security updates are provided for the **latest release**. Please stay up to date.
+
+---
 
 ## Known Limitations
 
-- **HTTPS required in production**: authHash is sent on each vault request. Over HTTP it could be intercepted.
-- **PBKDF2 iterations**: 600,000 for new users (OWASP). Legacy users: 120,000.
-- **Rate limiting**: In-memory, per-endpoint (register: 5/min, login: 10/min, vault: 30/min). Resets on server restart. Distributed attacks could bypass.
-- **Timing attacks**: Vault auth_hash comparison uses crypto.timingSafeEqual. Login uses DB lookup.
+- **No recovery** — Lost master key means permanent data loss. By design.
+- **HTTPS required** — Auth hash is sent on each request; HTTP is rejected in production.
+- **Rate limiting** — In-memory; resets on restart. Distributed setups may need Redis.
+- **No 2FA** — Not yet implemented; planned for future releases.

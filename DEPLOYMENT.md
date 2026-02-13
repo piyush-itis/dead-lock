@@ -1,8 +1,8 @@
 # Deployment Guide
 
-Deadlock runs as a **single Node.js server** that serves both the API and the frontend. You deploy once — no separate frontend/backend split unless you want it.
+Deadlock runs as a single Node.js server that serves both the API and frontend. One deploy, no separate services unless you choose a split setup.
 
-**Database:** PostgreSQL (Neon) only. SQLite is not supported.
+**Database:** PostgreSQL only ([Neon](https://neon.tech) free tier recommended). SQLite is not supported.
 
 ---
 

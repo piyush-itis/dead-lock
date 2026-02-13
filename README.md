@@ -1,88 +1,98 @@
-# Deadlock — Zero-Knowledge Password Manager
+# Deadlock
+
+> A lightweight, open-source password manager. Your data is encrypted on your device before it ever reaches the server.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 
-A lightweight, secure password manager where **all sensitive data is encrypted on your device** before it ever reaches the server. If the database is compromised, encrypted data is useless without your master key.
+---
 
-**Open source.** Audit the code. Trust, but verify.
+## Why Deadlock?
 
-## Security Model
+- **Zero-knowledge** — The server stores only encrypted blobs. We never see your passwords. A compromised database is useless without your master key.
+- **Client-side encryption** — AES-256-GCM. Keys never leave your browser.
+- **12-word recovery phrase** — BIP39-style. Write it down; there is no account recovery.
+- **Open source** — Audit the code. Trust, but verify.
 
-- **12-word master key** — Generated from BIP39 wordlist (~128 bits entropy). Write it down; there is no recovery.
-- **Client-side encryption** — AES-256-GCM. Passwords are encrypted in the browser, never sent in plaintext.
-- **Zero-knowledge** — The server stores only encrypted blobs, salt, and auth hashes. It cannot decrypt your data.
-- **Key derivation** — PBKDF2-SHA256 with 600,000 iterations (OWASP).
-- **Non-recoverable** — Lose your master key = lose access forever. No backdoors, no recovery options.
+---
 
-## Run Locally
+## Quick Start
+
+**Prerequisites:** Node.js 18+, a PostgreSQL database ([Neon](https://neon.tech) free tier works)
 
 ```bash
+git clone https://github.com/piyush-itis/deadlock.git
+cd deadlock
 npm install
+```
+
+Copy `.env.example` to `.env` and set your `DATABASE_URL`:
+
+```bash
+cp .env.example .env
+# Edit .env with your PostgreSQL connection string
+```
+
+Run locally:
+
+```bash
 npm run dev
 ```
 
-- Frontend: http://localhost:5173  
-- API proxy: /api → http://localhost:3000
+- **Frontend:** http://localhost:5173  
+- **API:** http://localhost:3000
 
-Requires PostgreSQL (e.g. [Neon](https://neon.tech)). Set `DATABASE_URL` in `.env`.
-
-### Testing on phone/other device
-
-Encryption requires a **secure context** (HTTPS or localhost). HTTP over LAN (`http://10.x.x.x:5173`) will fail with "digest" errors. Use a tunnel:
-
-```bash
-npx ngrok http 5173
-```
-
-Open the **https://** URL ngrok gives you on your phone.
-
-## Database (required)
-
-1. Create a free PostgreSQL database:
-   - [Neon](https://neon.tech) – serverless Postgres
-   - [Supabase](https://supabase.com) – Postgres + auth
-   - [Railway](https://railway.app), [PlanetScale](https://planetscale.com), etc.
-
-2. Copy the connection string and set it:
-   ```bash
-   export DATABASE_URL="postgresql://user:password@host/dbname?sslmode=require"
-   ```
-   Or create a `.env` file (see `.env.example`).
-
-3. Restart the server. Tables are created automatically.
+---
 
 ## Deploy
 
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment to **Vercel**, Railway, or Render.
+Deploy to Vercel, Railway, or Render in a few minutes. See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step guides.
 
-## Production (local)
+**Vercel** (recommended): Import the repo, add `DATABASE_URL` and `NODE_ENV=production`, deploy.
 
-```bash
-npm run build
-NODE_ENV=production npm start
+---
+
+## Project Structure
+
+```
+deadlock/
+├── client/         # Frontend (Vite, vanilla JS)
+│   ├── main.js     # App logic
+│   ├── crypto.js   # Encryption, key derivation
+│   └── style.css
+├── server/         # Express API
+│   ├── index.js    # Routes, middleware
+│   └── db.js       # PostgreSQL
+├── api/            # Vercel serverless entry
+└── vercel.json     # Build & rewrite config
 ```
 
-Serves the built frontend from `dist/` and API on the same port.
-
-**Required for production:**
-
-1. **HTTPS** — Deploy behind TLS (nginx, Caddy, Vercel, Railway, etc.). The server rejects HTTP when `NODE_ENV=production` and `trust proxy` is set.
-2. **CORS** — If frontend and API are on different origins, set `ALLOWED_ORIGINS` (comma-separated), e.g. `ALLOWED_ORIGINS=https://app.example.com`. Same-origin deployment can leave it unset.
-3. **PostgreSQL SSL** — Remote Postgres connections verify certificates. Neon/Supabase use valid certs by default.
-
-## Data Stored (Server)
-
-| Column       | Purpose                                |
-|-------------|-----------------------------------------|
-| `login_hash`| SHA256(master) — find account for login  |
-| `salt`      | Random per-user — key derivation        |
-| `auth_hash` | SHA256(master+salt) — vault access proof |
-| `encrypted_data` | AES-GCM ciphertext — your vault   |
-
-The server never sees your master key or plaintext passwords.
+---
 
 ## Security
 
-See [SECURITY.md](SECURITY.md) for vulnerability reporting. We welcome third-party audits.
+| Layer | Implementation |
+|-------|----------------|
+| Encryption | AES-256-GCM |
+| Key derivation | PBKDF2-SHA256, 600k iterations |
+| Breach check | HIBP k-anonymity (password never sent) |
+| Auth | Timing-safe comparison, rate limits, CSRF protection |
 
-**Requires HTTPS in production.** The auth hash is transmitted on each request; over HTTP it could be intercepted.
+See **[SECURITY.md](SECURITY.md)** for vulnerability reporting and the full security model.
+
+---
+
+## Documentation
+
+| Document | Description |
+|----------|-------------|
+| [DEPLOYMENT.md](DEPLOYMENT.md) | Deploy to Vercel, Railway, Render |
+| [SECURITY.md](SECURITY.md) | Security policy & reporting |
+| [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+
+---
+
+## License
+
+[MIT](LICENSE)
+
+---
