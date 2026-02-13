@@ -3,6 +3,7 @@
 > A lightweight, open-source password manager. Your data is encrypted on your device before it ever reaches the server.
 
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
+[![Buy Me a Coffee](https://img.shields.io/badge/Buy%20Me%20a%20Coffee-support-yellow)](https://buymeacoffee.com/piiyush)
 
 ---
 
@@ -88,6 +89,12 @@ See **[SECURITY.md](SECURITY.md)** for vulnerability reporting and the full secu
 | [DEPLOYMENT.md](DEPLOYMENT.md) | Deploy to Vercel, Railway, Render |
 | [SECURITY.md](SECURITY.md) | Security policy & reporting |
 | [CONTRIBUTING.md](CONTRIBUTING.md) | How to contribute |
+
+---
+
+## Support
+
+If Deadlock is useful to you, consider [buying me a coffee](https://buymeacoffee.com/piiyush).
 
 ---
 

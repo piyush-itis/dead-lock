@@ -397,6 +397,21 @@ button {
   font-size: 1rem;
 }
 
+.support-link {
+  display: block;
+  text-align: center;
+  font-size: 0.8rem;
+  color: var(--text-muted);
+  text-decoration: none;
+  margin-top: 1.5rem;
+  padding: 0.5rem;
+  transition: color var(--transition);
+}
+
+.support-link:hover {
+  color: var(--accent);
+}
+
 .vault-search-wrap {
   margin-bottom: 1rem;
 }

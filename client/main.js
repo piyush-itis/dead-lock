@@ -208,6 +208,7 @@ function renderWelcome() {
           <button class="btn-outline" data-action="login-email">Email & password</button>
         </div>
       </div>
+      <a href="https://buymeacoffee.com/piiyush" target="_blank" rel="noopener noreferrer" class="support-link">Help me buy a domain</a>
     </div>
   `;
 }
@@ -371,6 +372,7 @@ function renderVault() {
         <span class="btn-add-icon">+</span>
         Add password
       </button>
+      <a href="https://buymeacoffee.com/piiyush" target="_blank" rel="noopener noreferrer" class="support-link">Help me buy a domain</a>
     </div>
   `;
 }
