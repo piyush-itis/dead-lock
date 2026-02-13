@@ -274,7 +274,7 @@ app.post('/api/vault/restore', rateLimit(10), async (req, res) => {
 
 // GET /api/db - Confirm which database is in use
 app.get('/api/db', rateLimit(60), (req, res) => {
-  res.json({ database: isPg() ? 'postgresql' : 'sqlite' });
+  res.json({ database: 'postgresql' });
 });
 
 // GET /api/stats
@@ -288,8 +288,9 @@ app.get('/api/stats', rateLimit(60), async (req, res) => {
   }
 });
 
-// Serve static frontend in production
-if (process.env.NODE_ENV === 'production') {
+// Serve static frontend in production (only when NOT on Vercel - Vercel serves static separately)
+const isVercel = !!process.env.VERCEL;
+if (process.env.NODE_ENV === 'production' && !isVercel) {
   const { fileURLToPath } = await import('url');
   const { dirname, join } = await import('path');
   const __dirname = dirname(fileURLToPath(import.meta.url));
@@ -300,16 +301,19 @@ if (process.env.NODE_ENV === 'production') {
   });
 }
 
-const PORT = process.env.PORT || 3000;
-
-initDb()
-  .then(() => {
-    app.listen(PORT, () => {
-      const dbType = process.env.DATABASE_URL ? 'PostgreSQL' : 'SQLite';
-      console.log(`Deadlock running on http://localhost:${PORT} (${dbType})`);
+// Run as standalone server (Railway, Render, local) - NOT on Vercel
+if (!isVercel) {
+  const PORT = process.env.PORT || 3000;
+  initDb()
+    .then(() => {
+      app.listen(PORT, () => {
+        console.log(`Deadlock running on http://localhost:${PORT} (PostgreSQL)`);
+      });
+    })
+    .catch((err) => {
+      console.error('Database init failed:', err);
+      process.exit(1);
     });
-  })
-  .catch((err) => {
-    console.error('Database init failed:', err);
-    process.exit(1);
-  });
+}
+
+export default app;

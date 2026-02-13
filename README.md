@@ -24,7 +24,7 @@ npm run dev
 - Frontend: http://localhost:5173  
 - API proxy: /api → http://localhost:3000
 
-Uses SQLite by default (data stored in `data/vault.db`).
+Requires PostgreSQL (e.g. [Neon](https://neon.tech)). Set `DATABASE_URL` in `.env`.
 
 ### Testing on phone/other device
 
@@ -36,9 +36,7 @@ npx ngrok http 5173
 
 Open the **https://** URL ngrok gives you on your phone.
 
-## Hosted Database (PostgreSQL)
-
-To use a hosted database instead of SQLite:
+## Database (required)
 
 1. Create a free PostgreSQL database:
    - [Neon](https://neon.tech) – serverless Postgres
@@ -55,7 +53,7 @@ To use a hosted database instead of SQLite:
 
 ## Deploy
 
-See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment to Railway or Render.
+See **[DEPLOYMENT.md](DEPLOYMENT.md)** for step-by-step deployment to **Vercel**, Railway, or Render.
 
 ## Production (local)
 

@@ -2,13 +2,63 @@
 
 Deadlock runs as a **single Node.js server** that serves both the API and the frontend. You deploy once — no separate frontend/backend split unless you want it.
 
+**Database:** PostgreSQL (Neon) only. SQLite is not supported.
+
 ---
 
-## Prerequisites
+## Deploy to Vercel (recommended)
+
+### Prerequisites
+
+- [Neon](https://neon.tech) account (free tier)
+- GitHub repo with your code
+- [Vercel](https://vercel.com) account
+
+### Step 1: Create the database
+
+1. Go to [Neon](https://neon.tech) and create a new project.
+2. Copy the **connection string** — use the **pooler** URL (ends with `-pooler`) for serverless.
+3. Add `?sslmode=require` if not present.
+
+### Step 2: Deploy
+
+1. Go to [vercel.com](https://vercel.com) and sign in with GitHub.
+2. Click **Add New** → **Project** and import your Deadlock repo.
+3. **Framework Preset:** Other (or leave default).
+4. **Build Command:** `npm run build` (default)
+5. **Output Directory:** `client/dist` (Vercel may auto-detect from vercel.json)
+6. **Root Directory:** leave empty
+
+### Step 3: Environment variables
+
+In Project Settings → Environment Variables, add:
+
+| Variable | Value |
+|----------|-------|
+| `DATABASE_URL` | Your Neon pooler connection string |
+| `NODE_ENV` | `production` |
+| `ALLOWED_ORIGINS` | Your Vercel URL, e.g. `https://your-app.vercel.app` (optional for same-origin) |
+
+### Step 4: Deploy
+
+Click **Deploy**. Vercel will:
+- Build the frontend → `client/dist`
+- Deploy the API as serverless functions (from `api/`)
+- Serve the app at your `.vercel.app` URL
+
+### Step 5: Test
+
+Open your Vercel URL, create an account, and add a password.
+
+---
+
+## Deploy to Railway
+
+### Prerequisites
 
 - [Neon](https://neon.tech) or [Supabase](https://supabase.com) account (free tier works)
 - GitHub repo with your code
-- An account on [Railway](https://railway.app) or [Render](https://render.com)
+- An account on [Railway](https://railway.app)
 
 ---
 

@@ -1,4 +1,7 @@
 {
-  "buildCommand": "npm run build",
-  "outputDirectory": "client/dist"
+  "buildCommand": "npm install && npm run build",
+  "outputDirectory": "client/dist",
+  "rewrites": [
+    { "source": "/((?!api/|assets/|logo\\.png).*)", "destination": "/index.html" }
+  ]
 }
