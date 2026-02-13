@@ -73,4 +73,4 @@ We’ll review and may ask for changes. Once approved, we’ll merge.
 
 ## Questions?
 
-Open a [Discussion](https://github.com/your-username/deadlock/discussions) or an issue. We’re happy to help.
+Open a [Discussion](https://github.com/piyush-itis/deadlock/discussions) or an issue. We’re happy to help.
